@@ -211,18 +211,20 @@ def generate_nmr_spectrum(rows, x_min=0, x_max=12, num_points=2000):
     x = np.linspace(x_min, x_max, num_points)
     y = np.zeros_like(x)
     
-    # Peak width (Hz converted to ppm-ish, simplified)
-    width = 0.03  # narrow peaks for visualization
+    # Peak width for visualization
+    width = 0.04
+    
+    # Calculate total H for normalization reference
+    total_h = sum(row["H count (Integral)"] for row in rows)
+    if total_h == 0:
+        return x, y
     
     for row in rows:
         shift_str = row["Shift δ (ppm)"]
-        intensity = row["H count (Integral)"]
+        h_count = row["H count (Integral)"]
         center = parse_shift_range(shift_str)
         
-        # Add some randomness for visual realism
-        center += np.random.uniform(-0.05, 0.05)
-        
-        # Splitting pattern - simplified visualization
+        # Splitting pattern
         split = row["Splitting (n+1)"]
         n_peaks = 1
         if "doublet" in split:
@@ -238,24 +240,30 @@ def generate_nmr_spectrum(rows, x_min=0, x_max=12, num_points=2000):
         elif "septet" in split:
             n_peaks = 7
         
-        # J coupling constant (simplified)
-        J = 0.02  # ppm spacing
+        # J coupling constant (ppm spacing between peaks)
+        J = 0.025
         
-        # Generate multiplet pattern
+        # Pascal's triangle coefficients for multiplet intensities
+        from math import comb
+        pascal_coeffs = [comb(n_peaks - 1, i) for i in range(n_peaks)]
+        pascal_sum = sum(pascal_coeffs)
+        
+        # Generate multiplet pattern - intensity proportional to H count
         for i in range(n_peaks):
-            # Pascal's triangle for intensities
-            pascal_intensity = 1
-            if n_peaks > 1:
-                from math import comb
-                pascal_intensity = comb(n_peaks - 1, i)
+            # Each peak's fraction of total multiplet intensity
+            peak_fraction = pascal_coeffs[i] / pascal_sum
+            peak_intensity = h_count * peak_fraction
             
             peak_pos = center + (i - (n_peaks - 1) / 2) * J
-            # Lorentzian peak
-            y += (intensity * pascal_intensity / n_peaks) * (width ** 2) / ((x - peak_pos) ** 2 + width ** 2)
+            # Lorentzian peak shape
+            y += peak_intensity * (width ** 2) / ((x - peak_pos) ** 2 + width ** 2)
     
-    # Normalize
+    # Scale so that peak heights reflect relative H counts
+    # Don't fully normalize - keep relative intensities
+    max_h = max(row["H count (Integral)"] for row in rows)
     if y.max() > 0:
-        y = y / y.max()
+        # Scale so the tallest peak group corresponds to its H count
+        y = y * (max_h / y.max())
     
     return x, y
 
@@ -292,6 +300,9 @@ st.subheader("¹H-NMR Spektrum (simuliert)")
 if rows:
     x, y = generate_nmr_spectrum(rows)
     
+    # Get max H count for y-axis scaling
+    max_h = max(row["H count (Integral)"] for row in rows)
+    
     # Create spectrum chart data
     spectrum_df = pd.DataFrame({
         'ppm': x,
@@ -306,8 +317,8 @@ if rows:
                 scale=alt.Scale(domain=[12, 0]),  # Inverted x-axis (NMR convention)
                 title='Chemische Verschiebung δ (ppm)'),
         y=alt.Y('Intensität:Q', 
-                title='Relative Intensität',
-                scale=alt.Scale(domain=[0, 1.1]))
+                title='Relative Intensität (H-Anzahl)',
+                scale=alt.Scale(domain=[0, max_h * 1.15]))
     ).properties(
         height=350,
         title='Simuliertes ¹H-NMR Spektrum'
@@ -318,12 +329,12 @@ if rows:
     
     st.altair_chart(chart, use_container_width=True)
     
-    # Add peak labels
-    st.caption("**Peaks:**")
+    # Add integration info
+    st.caption("**Integrale (Fläche ∝ H-Anzahl):**")
     peak_info = []
     for row in rows:
         shift = parse_shift_range(row["Shift δ (ppm)"])
-        peak_info.append(f"δ {shift:.1f} ppm ({row['H count (Integral)']}H, {row['Splitting (n+1)']})")
+        peak_info.append(f"δ {shift:.1f} ppm: **{row['H count (Integral)']}H** ({row['Splitting (n+1)']})")
     st.write(" | ".join(peak_info))
 else:
     st.info("Keine Protonen für Spektrum gefunden.")
