@@ -192,7 +192,7 @@ def get_molecule_name_from_pubchem(smiles: str) -> Optional[str]:
     try:
         # First, get the CID from SMILES
         url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/cids/JSON"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=3)
         
         if response.status_code != 200:
             return None
@@ -205,7 +205,7 @@ def get_molecule_name_from_pubchem(smiles: str) -> Optional[str]:
         
         # Get the compound properties including name
         props_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/IUPACName,Title/JSON"
-        props_response = requests.get(props_url, timeout=5)
+        props_response = requests.get(props_url, timeout=3)
         
         if props_response.status_code != 200:
             return None
@@ -235,7 +235,7 @@ def get_pubchem_synonyms(smiles: str, max_synonyms: int = 5) -> list:
     """
     try:
         url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/synonyms/JSON"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=3)
         
         if response.status_code != 200:
             return []
