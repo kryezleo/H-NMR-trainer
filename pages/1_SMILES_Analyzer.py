@@ -308,14 +308,7 @@ if smiles:
     # Canonical SMILES
     canonical = canonicalize_smiles(smiles)
     
-    # Try to get molecule name from PubChem
-    molecule_name = get_molecule_name_from_pubchem(canonical)
-    synonyms = get_pubchem_synonyms(canonical, max_synonyms=5)
-    
-    if molecule_name:
-        st.success(f"✅ **{molecule_name}** — Valid SMILES parsed successfully")
-    else:
-        st.success(f"✅ Valid SMILES parsed successfully")
+    st.success(f"✅ Valid SMILES parsed successfully")
     
     st.divider()
     
@@ -328,8 +321,7 @@ if smiles:
         # Generate and display structure
         try:
             img_bytes = generate_2d_image(mol, size=(450, 450))
-            caption = f"{molecule_name}" if molecule_name else canonical
-            st.image(img_bytes, caption=caption)
+            st.image(img_bytes, caption=canonical)
             
             # Download button for image
             st.download_button(
@@ -346,13 +338,19 @@ if smiles:
     with col2:
         st.subheader("Molecule Information")
         
-        # Display molecule name prominently if available
-        if molecule_name:
-            st.markdown(f"### {molecule_name}")
-            
-            if synonyms:
-                st.markdown("**Alternative Names:**")
-                st.caption(", ".join(synonyms))
+        # Optional: Lookup molecule name from PubChem
+        if st.button("🔍 Lookup Name from PubChem"):
+            with st.spinner("Searching PubChem..."):
+                molecule_name = get_molecule_name_from_pubchem(canonical)
+                synonyms = get_pubchem_synonyms(canonical, max_synonyms=5)
+                
+                if molecule_name:
+                    st.markdown(f"### {molecule_name}")
+                    if synonyms:
+                        st.markdown("**Alternative Names:**")
+                        st.caption(", ".join(synonyms))
+                else:
+                    st.info("Molecule not found in PubChem database")
         
         st.markdown("**Input SMILES:**")
         st.code(smiles, language=None)
