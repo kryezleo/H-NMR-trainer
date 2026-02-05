@@ -121,17 +121,20 @@ def generate_2d_image(mol: Chem.Mol, size: tuple = (500, 500)) -> bytes:
     Returns:
         PNG image as bytes
     """
+    from io import BytesIO
+    
     # Compute 2D coordinates if not present
     AllChem.Compute2DCoords(mol)
     
-    # Use the MolDraw2DCairo for high-quality rendering
-    drawer = rdMolDraw2D.MolDraw2DCairo(size[0], size[1])
-    drawer.drawOptions().addStereoAnnotation = True
-    drawer.drawOptions().addAtomIndices = False
-    drawer.DrawMolecule(mol)
-    drawer.FinishDrawing()
+    # Use Draw.MolToImage which is more reliable across environments
+    img = Draw.MolToImage(mol, size=size)
     
-    return drawer.GetDrawingText()
+    # Convert PIL Image to bytes
+    img_buffer = BytesIO()
+    img.save(img_buffer, format='PNG')
+    img_buffer.seek(0)
+    
+    return img_buffer.getvalue()
 
 
 def generate_svg_image(mol: Chem.Mol, size: tuple = (500, 500)) -> str:
