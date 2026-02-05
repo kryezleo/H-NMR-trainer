@@ -1,6 +1,6 @@
 streamlit
 pandas
-rdkit
+rdkit-pypi
 streamlit-ketcher
 numpy
 altair
