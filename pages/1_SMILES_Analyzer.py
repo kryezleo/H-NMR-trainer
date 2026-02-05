@@ -21,7 +21,6 @@ from rdkit.Chem import (
     rdMolDescriptors,
     AllChem,
 )
-from rdkit.Chem.Draw import rdMolDraw2D
 
 # Page configuration
 st.set_page_config(
