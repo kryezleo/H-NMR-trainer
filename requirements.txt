@@ -4,3 +4,4 @@ streamlit-ketcher
 numpy
 altair
 rdkit
+requests

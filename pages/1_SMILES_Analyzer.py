@@ -12,6 +12,7 @@ Part of the Spectroscopy Analysis Tools for Bachelor's Thesis at ZHAW.
 import streamlit as st
 from io import BytesIO
 from typing import Optional, Dict, Any
+import requests
 
 from rdkit import Chem
 from rdkit.Chem import (
@@ -174,6 +175,77 @@ def check_lipinski_rules(properties: Dict[str, Any]) -> Dict[str, bool]:
     return rules
 
 
+@st.cache_data(ttl=3600)
+def get_molecule_name_from_pubchem(smiles: str) -> Optional[str]:
+    """
+    Retrieve the IUPAC name or common name of a molecule from PubChem.
+    
+    Args:
+        smiles: Canonical SMILES string
+        
+    Returns:
+        Molecule name if found, None otherwise
+    """
+    try:
+        # First, get the CID from SMILES
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/cids/JSON"
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        cid = data.get("IdentifierList", {}).get("CID", [None])[0]
+        
+        if not cid:
+            return None
+        
+        # Get the compound properties including name
+        props_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/IUPACName,Title/JSON"
+        props_response = requests.get(props_url, timeout=5)
+        
+        if props_response.status_code != 200:
+            return None
+        
+        props_data = props_response.json()
+        properties = props_data.get("PropertyTable", {}).get("Properties", [{}])[0]
+        
+        # Prefer Title (common name) over IUPAC name
+        name = properties.get("Title") or properties.get("IUPACName")
+        return name
+    
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_pubchem_synonyms(smiles: str, max_synonyms: int = 5) -> list:
+    """
+    Retrieve synonyms/alternative names from PubChem.
+    
+    Args:
+        smiles: Canonical SMILES string
+        max_synonyms: Maximum number of synonyms to return
+        
+    Returns:
+        List of synonym strings
+    """
+    try:
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/synonyms/JSON"
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code != 200:
+            return []
+        
+        data = response.json()
+        synonyms = data.get("InformationList", {}).get("Information", [{}])[0].get("Synonym", [])
+        
+        return synonyms[:max_synonyms]
+    
+    except Exception:
+        return []
+
+
 # -----------------------------------------------------------------------------
 # Main Application
 # -----------------------------------------------------------------------------
@@ -233,7 +305,14 @@ if smiles:
     # Canonical SMILES
     canonical = canonicalize_smiles(smiles)
     
-    st.success(f"✅ Valid SMILES parsed successfully")
+    # Try to get molecule name from PubChem
+    molecule_name = get_molecule_name_from_pubchem(canonical)
+    synonyms = get_pubchem_synonyms(canonical, max_synonyms=5)
+    
+    if molecule_name:
+        st.success(f"✅ **{molecule_name}** — Valid SMILES parsed successfully")
+    else:
+        st.success(f"✅ Valid SMILES parsed successfully")
     
     st.divider()
     
@@ -246,7 +325,8 @@ if smiles:
         # Generate and display structure
         try:
             img_bytes = generate_2d_image(mol, size=(450, 450))
-            st.image(img_bytes, caption=f"Structure of: {canonical}")
+            caption = f"{molecule_name}" if molecule_name else canonical
+            st.image(img_bytes, caption=caption)
             
             # Download button for image
             st.download_button(
@@ -261,7 +341,15 @@ if smiles:
             st.image(img, caption=f"Structure of: {canonical}")
     
     with col2:
-        st.subheader("SMILES Information")
+        st.subheader("Molecule Information")
+        
+        # Display molecule name prominently if available
+        if molecule_name:
+            st.markdown(f"### {molecule_name}")
+            
+            if synonyms:
+                st.markdown("**Alternative Names:**")
+                st.caption(", ".join(synonyms))
         
         st.markdown("**Input SMILES:**")
         st.code(smiles, language=None)
