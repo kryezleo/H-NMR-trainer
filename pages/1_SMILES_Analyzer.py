@@ -136,28 +136,6 @@ def generate_2d_image(mol: Chem.Mol, size: tuple = (500, 500)) -> bytes:
     return img_buffer.getvalue()
 
 
-def generate_svg_image(mol: Chem.Mol, size: tuple = (500, 500)) -> str:
-    """
-    Generate a 2D molecular structure as SVG.
-    
-    Args:
-        mol: RDKit Mol object
-        size: Image dimensions (width, height)
-        
-    Returns:
-        SVG as string
-    """
-    # Compute 2D coordinates if not present
-    AllChem.Compute2DCoords(mol)
-    
-    drawer = rdMolDraw2D.MolDraw2DSVG(size[0], size[1])
-    drawer.drawOptions().addStereoAnnotation = True
-    drawer.DrawMolecule(mol)
-    drawer.FinishDrawing()
-    
-    return drawer.GetDrawingText()
-
-
 def check_lipinski_rules(properties: Dict[str, Any]) -> Dict[str, bool]:
     """
     Check Lipinski's Rule of Five for drug-likeness.
