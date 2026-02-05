@@ -1,6 +1,6 @@
-streamlit
-pandas
-streamlit-ketcher
-numpy
-altair
-rdkit
+streamlit>=1.30.0
+pandas>=2.0.0
+streamlit-ketcher>=0.1.0
+numpy>=1.24.0
+altair>=5.0.0
+rdkit>=2023.9.1
