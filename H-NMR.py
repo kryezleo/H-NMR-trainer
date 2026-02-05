@@ -1,5 +1,6 @@
 # app.py
 import re
+import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit_ketcher import st_ketcher
@@ -194,6 +195,70 @@ def group_proton_sets(mol):
 
     return rows
 
+def parse_shift_range(shift_str: str) -> float:
+    """Extract middle value from shift range string like '0.7–1.2 (alkyl CH₃)'"""
+    match = re.search(r'([\d.]+)[–-]([\d.]+)', shift_str)
+    if match:
+        low, high = float(match.group(1)), float(match.group(2))
+        return (low + high) / 2
+    return 1.0  # default
+
+def generate_nmr_spectrum(rows, x_min=0, x_max=12, num_points=2000):
+    """
+    Generate a simulated 1H-NMR spectrum with Lorentzian peaks.
+    Returns x (ppm) and y (intensity) arrays.
+    """
+    x = np.linspace(x_min, x_max, num_points)
+    y = np.zeros_like(x)
+    
+    # Peak width (Hz converted to ppm-ish, simplified)
+    width = 0.03  # narrow peaks for visualization
+    
+    for row in rows:
+        shift_str = row["Shift δ (ppm)"]
+        intensity = row["H count (Integral)"]
+        center = parse_shift_range(shift_str)
+        
+        # Add some randomness for visual realism
+        center += np.random.uniform(-0.05, 0.05)
+        
+        # Splitting pattern - simplified visualization
+        split = row["Splitting (n+1)"]
+        n_peaks = 1
+        if "doublet" in split:
+            n_peaks = 2
+        elif "triplet" in split:
+            n_peaks = 3
+        elif "quartet" in split:
+            n_peaks = 4
+        elif "quintet" in split:
+            n_peaks = 5
+        elif "sextet" in split:
+            n_peaks = 6
+        elif "septet" in split:
+            n_peaks = 7
+        
+        # J coupling constant (simplified)
+        J = 0.02  # ppm spacing
+        
+        # Generate multiplet pattern
+        for i in range(n_peaks):
+            # Pascal's triangle for intensities
+            pascal_intensity = 1
+            if n_peaks > 1:
+                from math import comb
+                pascal_intensity = comb(n_peaks - 1, i)
+            
+            peak_pos = center + (i - (n_peaks - 1) / 2) * J
+            # Lorentzian peak
+            y += (intensity * pascal_intensity / n_peaks) * (width ** 2) / ((x - peak_pos) ** 2 + width ** 2)
+    
+    # Normalize
+    if y.max() > 0:
+        y = y / y.max()
+    
+    return x, y
+
 # -----------------------
 # 3) Compute + display
 # -----------------------
@@ -217,6 +282,51 @@ with col2:
     else:
         df = pd.DataFrame(rows)
         st.dataframe(df, use_container_width=True)
+
+# -----------------------
+# 4) NMR Spectrum Visualization
+# -----------------------
+st.markdown("---")
+st.subheader("¹H-NMR Spektrum (simuliert)")
+
+if rows:
+    x, y = generate_nmr_spectrum(rows)
+    
+    # Create spectrum chart data
+    spectrum_df = pd.DataFrame({
+        'ppm': x,
+        'Intensität': y
+    })
+    
+    # Use Streamlit's native chart with inverted x-axis (NMR convention)
+    import altair as alt
+    
+    chart = alt.Chart(spectrum_df).mark_line(color='#1f77b4', strokeWidth=1.5).encode(
+        x=alt.X('ppm:Q', 
+                scale=alt.Scale(domain=[12, 0]),  # Inverted x-axis (NMR convention)
+                title='Chemische Verschiebung δ (ppm)'),
+        y=alt.Y('Intensität:Q', 
+                title='Relative Intensität',
+                scale=alt.Scale(domain=[0, 1.1]))
+    ).properties(
+        height=350,
+        title='Simuliertes ¹H-NMR Spektrum'
+    ).configure_axis(
+        grid=True,
+        gridColor='#e0e0e0'
+    )
+    
+    st.altair_chart(chart, use_container_width=True)
+    
+    # Add peak labels
+    st.caption("**Peaks:**")
+    peak_info = []
+    for row in rows:
+        shift = parse_shift_range(row["Shift δ (ppm)"])
+        peak_info.append(f"δ {shift:.1f} ppm ({row['H count (Integral)']}H, {row['Splitting (n+1)']})")
+    st.write(" | ".join(peak_info))
+else:
+    st.info("Keine Protonen für Spektrum gefunden.")
 
 st.caption(
     "Hinweis: Shift & Splitting sind hier **Heuristiken für Training**. "
