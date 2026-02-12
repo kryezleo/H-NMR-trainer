@@ -3,5 +3,5 @@ pandas
 streamlit-ketcher
 numpy
 altair
-rdkit-pypi
+rdkit
 requests
