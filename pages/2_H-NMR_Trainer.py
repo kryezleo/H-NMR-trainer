@@ -15,8 +15,11 @@ from math import comb
 import numpy as np
 import pandas as pd
 import streamlit as st
-from streamlit_ketcher import st_ketcher
 import altair as alt
+try:
+    from streamlit_ketcher import st_ketcher
+except Exception:
+    st_ketcher = None
 
 from rdkit import Chem
 from rdkit.Chem import Draw
@@ -323,9 +326,18 @@ st.divider()
 
 # Ketcher Editor
 st.subheader("Molecular Editor")
-st.caption("⬇️ Draw your molecule in the editor below. Click **Apply** (top right) when done.")
+smiles = ""
 
-smiles = st_ketcher(height=500)
+if st_ketcher is not None:
+    st.caption("⬇️ Draw your molecule in the editor below. Click **Apply** (top right) when done.")
+    smiles = st_ketcher(height=500)
+else:
+    st.warning("Ketcher editor unavailable in this session. Using SMILES input fallback.")
+    smiles = st.text_input(
+        "Enter SMILES:",
+        value="CCO",
+        placeholder="e.g. CCO"
+    )
 
 # Display current SMILES
 if smiles:
