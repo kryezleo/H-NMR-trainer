@@ -7,7 +7,33 @@ and NMR spectroscopy training, developed as part of a Bachelor's thesis at ZHAW.
 Author: Leon Akryeziu
 """
 
+import os
+import sys
+
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+
+def _bootstrap_streamlit_when_run_as_python_script() -> None:
+    """
+    Re-launch via `streamlit run` when started with `python app.py`.
+    This prevents the common "nothing opens" behavior in IDE run buttons.
+    """
+    if __name__ != "__main__":
+        return
+    if get_script_run_ctx() is not None:
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "run":
+        return
+
+    from streamlit.web import cli as stcli
+
+    sys.argv = ["streamlit", "run", os.path.abspath(__file__)]
+    raise SystemExit(stcli.main())
+
+
+_bootstrap_streamlit_when_run_as_python_script()
 
 # Page configuration - must be first Streamlit command
 st.set_page_config(
