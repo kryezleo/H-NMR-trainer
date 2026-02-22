@@ -13,6 +13,9 @@ import streamlit as st
 from io import BytesIO
 from typing import Optional, Dict, Any
 import requests
+import numpy as np
+import pandas as pd
+import altair as alt
 
 from rdkit import Chem
 from rdkit.Chem import (
@@ -153,6 +156,189 @@ def check_lipinski_rules(properties: Dict[str, Any]) -> Dict[str, bool]:
         "HBA ≤ 10": properties["H-Bond Acceptors"] <= 10,
     }
     return rules
+
+
+def _gaussian(x: np.ndarray, center: float, width: float, height: float) -> np.ndarray:
+    """Simple Gaussian peak shape for simulated spectra."""
+    return height * np.exp(-0.5 * ((x - center) / width) ** 2)
+
+
+def _lorentzian(x: np.ndarray, center: float, width: float, height: float) -> np.ndarray:
+    """Simple Lorentzian peak shape for NMR-style lines."""
+    return height * (width ** 2) / ((x - center) ** 2 + width ** 2)
+
+
+def generate_simulated_h_nmr_spectrum(mol: Chem.Mol) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate a simple heuristic 1H-NMR spectrum from SMILES (educational only).
+    """
+    mol_h = Chem.AddHs(Chem.Mol(mol))
+    x = np.linspace(0, 12, 2200)
+    y = np.zeros_like(x)
+
+    for atom in mol_h.GetAtoms():
+        if atom.GetSymbol() != "C":
+            continue
+        h_count = sum(1 for n in atom.GetNeighbors() if n.GetSymbol() == "H")
+        if h_count == 0:
+            continue
+
+        nbr_symbols = {n.GetSymbol() for n in atom.GetNeighbors() if n.GetSymbol() != "H"}
+
+        if atom.GetIsAromatic():
+            center = 7.1
+        elif any(n.GetSymbol() == "O" for n in atom.GetNeighbors()):
+            center = 3.7
+        elif any(n.GetSymbol() == "N" for n in atom.GetNeighbors()):
+            center = 2.9
+        elif atom.GetHybridization() == Chem.rdchem.HybridizationType.SP2:
+            center = 5.5
+        elif any(n.GetSymbol() in {"Cl", "Br", "F", "I"} for n in atom.GetNeighbors()):
+            center = 3.4
+        elif "C" in nbr_symbols:
+            center = 1.2
+        else:
+            center = 1.6
+
+        y += _lorentzian(x, center, width=0.03, height=float(h_count))
+
+    if y.max() > 0:
+        y = y / y.max()
+    return x, y
+
+
+def generate_simulated_c_nmr_spectrum(mol: Chem.Mol) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate a simple heuristic 13C-NMR spectrum (stick-like peaks broadened).
+    """
+    x = np.linspace(0, 220, 2600)
+    y = np.zeros_like(x)
+
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() != "C":
+            continue
+
+        if atom.GetIsAromatic():
+            center = 128
+        elif any(n.GetSymbol() == "O" and any(b.GetBondType() == Chem.rdchem.BondType.DOUBLE for b in atom.GetBonds()) for n in atom.GetNeighbors()):
+            center = 175
+        elif atom.GetHybridization() == Chem.rdchem.HybridizationType.SP2:
+            center = 135
+        elif any(n.GetSymbol() == "O" for n in atom.GetNeighbors()):
+            center = 62
+        elif any(n.GetSymbol() == "N" for n in atom.GetNeighbors()):
+            center = 45
+        else:
+            center = 25
+
+        y += _lorentzian(x, center, width=0.8, height=1.0)
+
+    if y.max() > 0:
+        y = y / y.max()
+    return x, y
+
+
+def generate_simulated_ir_spectrum(mol: Chem.Mol) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate a basic transmittance-like IR spectrum from functional groups.
+    """
+    x = np.linspace(400, 4000, 3200)  # ascending for computation
+    trans = np.full_like(x, 95.0)
+
+    # Broad/specific absorptions (simple heuristics)
+    if any(a.GetSymbol() == "O" for a in mol.GetAtoms()):
+        trans -= _gaussian(x, 3400, 180, 28)  # O-H (broad, heuristic)
+        trans -= _gaussian(x, 1050, 60, 18)   # C-O
+    if any(a.GetSymbol() == "N" for a in mol.GetAtoms()):
+        trans -= _gaussian(x, 3300, 120, 15)  # N-H
+        trans -= _gaussian(x, 1200, 70, 12)   # C-N
+
+    has_carbonyl = False
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() != "C":
+            continue
+        for bond in atom.GetBonds():
+            if bond.GetBondType() == Chem.rdchem.BondType.DOUBLE:
+                other = bond.GetOtherAtom(atom)
+                if other.GetSymbol() == "O":
+                    has_carbonyl = True
+                    break
+        if has_carbonyl:
+            break
+
+    if has_carbonyl:
+        trans -= _gaussian(x, 1715, 35, 45)  # C=O strong
+
+    if any(a.GetIsAromatic() for a in mol.GetAtoms()):
+        trans -= _gaussian(x, 1600, 30, 20)
+        trans -= _gaussian(x, 1500, 30, 14)
+        trans -= _gaussian(x, 750, 30, 16)
+
+    # C-H stretches
+    trans -= _gaussian(x, 2950, 50, 12)
+    if any(a.GetHybridization() == Chem.rdchem.HybridizationType.SP2 for a in mol.GetAtoms() if a.GetSymbol() == "C"):
+        trans -= _gaussian(x, 3050, 45, 10)
+
+    trans = np.clip(trans, 5, 100)
+    return x, trans
+
+
+def generate_simulated_msms_spectrum(mol: Chem.Mol) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate a simple MS/MS-like stick spectrum based on exact mass and fragments.
+    """
+    precursor = max(10.0, float(Descriptors.ExactMolWt(mol)))
+    max_mz = max(200.0, precursor + 20.0)
+    x = np.linspace(0, max_mz, 2400)
+    y = np.zeros_like(x)
+
+    # Parent ion and a few heuristic fragment ions
+    fragment_masses = {
+        precursor: 0.35,
+        max(15.0, precursor - 18.0): 0.55,  # loss of water-like fragment
+        max(15.0, precursor - 28.0): 0.45,  # CO / C2H4-like loss
+        max(15.0, precursor - 44.0): 0.60,  # CO2-like loss
+        max(15.0, precursor / 2): 0.90,     # major fragment
+    }
+
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() in {"O", "N"}:
+            fragment_masses[31.0 if atom.GetSymbol() == "O" else 30.0] = 0.25
+        if atom.GetSymbol() in {"Cl", "Br"}:
+            fragment_masses[35.0 if atom.GetSymbol() == "Cl" else 79.0] = 0.40
+
+    for mz, intensity in fragment_masses.items():
+        y += _gaussian(x, mz, width=0.25, height=float(intensity))
+
+    if y.max() > 0:
+        y = 100 * y / y.max()
+    return x, y
+
+
+def render_spectrum_chart(
+    x: np.ndarray,
+    y: np.ndarray,
+    title: str,
+    x_title: str,
+    y_title: str,
+    invert_x: bool = False,
+    color: str = "#1f77b4",
+):
+    """Render a line chart for a simulated spectrum."""
+    df = pd.DataFrame({"x": x, "y": y})
+    x_scale = alt.Scale(domain=[float(x.max()), float(x.min())]) if invert_x else alt.Scale(domain=[float(x.min()), float(x.max())])
+
+    chart = (
+        alt.Chart(df)
+        .mark_line(color=color, strokeWidth=1.8)
+        .encode(
+            x=alt.X("x:Q", title=x_title, scale=x_scale),
+            y=alt.Y("y:Q", title=y_title),
+        )
+        .properties(height=260, title=title)
+        .configure_axis(grid=True, gridColor="#e8e8e8")
+    )
+    st.altair_chart(chart, use_container_width=True)
 
 
 @st.cache_data(ttl=3600)
@@ -349,6 +535,62 @@ if smiles:
             st.info("InChI generation not available")
     
     st.divider()
+
+    # Simulated spectra overview
+    st.subheader("Simulated Spectra (from SMILES)")
+    st.caption(
+        "Educational preview generated heuristically from the molecular structure. "
+        "Includes MS/MS, 13C-NMR, 1H-NMR, and IR."
+    )
+
+    spec_col1, spec_col2 = st.columns(2)
+
+    with spec_col1:
+        ms_x, ms_y = generate_simulated_msms_spectrum(mol)
+        render_spectrum_chart(
+            ms_x,
+            ms_y,
+            title="MS/MS Spectrum (Simulated)",
+            x_title="m/z",
+            y_title="Relative Intensity (%)",
+            color="#C0392B",
+        )
+
+        c_x, c_y = generate_simulated_c_nmr_spectrum(mol)
+        render_spectrum_chart(
+            c_x,
+            c_y,
+            title="13C-NMR Spectrum (Simulated)",
+            x_title="Chemical Shift δ (ppm)",
+            y_title="Relative Intensity",
+            invert_x=True,
+            color="#117A65",
+        )
+
+    with spec_col2:
+        h_x, h_y = generate_simulated_h_nmr_spectrum(mol)
+        render_spectrum_chart(
+            h_x,
+            h_y,
+            title="1H-NMR Spectrum (Simulated)",
+            x_title="Chemical Shift δ (ppm)",
+            y_title="Relative Intensity",
+            invert_x=True,
+            color="#1F618D",
+        )
+
+        ir_x, ir_y = generate_simulated_ir_spectrum(mol)
+        render_spectrum_chart(
+            ir_x,
+            ir_y,
+            title="IR Spectrum (Simulated)",
+            x_title="Wavenumber (cm-1)",
+            y_title="Transmittance (%)",
+            invert_x=True,
+            color="#7D3C98",
+        )
+
+    st.divider()
     
     # Molecular Properties
     st.subheader("Molecular Properties")
@@ -407,7 +649,6 @@ if smiles:
     
     # Full properties table
     with st.expander("📊 View All Properties as Table"):
-        import pandas as pd
         df = pd.DataFrame(list(properties.items()), columns=["Property", "Value"])
         st.dataframe(df, use_container_width=True, hide_index=True)
 
